@@ -1,0 +1,105 @@
+/* Base styling shared by the PDF and (where supported) DOCX writers.
+   Kept deliberately simple: xhtml2pdf supports only a subset of CSS, so we avoid
+   flexbox/grid and stick to properties it understands (margins, borders, fonts,
+   page breaks). weasyprint honours all of it and a bit more. */
+
+@page {
+    size: a4;
+    margin: 2cm;
+}
+
+body {
+    font-family: "Helvetica", "Arial", sans-serif;
+    font-size: 11pt;
+    line-height: 1.45;
+    color: #1a1a1a;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Helvetica", "Arial", sans-serif;
+    color: #111;
+    line-height: 1.2;
+    margin-top: 1.1em;
+    margin-bottom: 0.4em;
+}
+
+h1 { font-size: 22pt; border-bottom: 2px solid #ddd; padding-bottom: 4px; }
+h2 { font-size: 17pt; border-bottom: 1px solid #eee; padding-bottom: 3px; }
+h3 { font-size: 14pt; }
+h4 { font-size: 12pt; }
+
+p { margin: 0.5em 0; }
+
+a { color: #2a6db0; text-decoration: none; }
+
+/* Inline code and code blocks */
+code {
+    font-family: "Courier New", monospace;
+    font-size: 10pt;
+    background-color: #f4f4f4;
+    padding: 1px 3px;
+}
+
+pre {
+    font-family: "Courier New", monospace;
+    font-size: 9.5pt;
+    background-color: #f4f4f4;
+    border: 1px solid #e0e0e0;
+    padding: 8px 10px;
+    margin: 0.6em 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+pre code { background-color: transparent; padding: 0; }
+
+/* Mermaid fallback block (when no renderer is available) */
+pre.mermaid {
+    background-color: #fff8e6;
+    border: 1px dashed #d4b96a;
+}
+
+blockquote {
+    margin: 0.6em 0;
+    padding: 2px 12px;
+    color: #555;
+    border-left: 4px solid #ddd;
+    background-color: #fafafa;
+}
+
+/* GFM tables */
+table {
+    border-collapse: collapse;
+    margin: 0.7em 0;
+    width: 100%;
+}
+
+th, td {
+    border: 1px solid #ccc;
+    padding: 5px 8px;
+    text-align: left;
+}
+
+th { background-color: #f0f0f0; font-weight: bold; }
+
+img { max-width: 100%; }
+
+/* Math images render inline with the text baseline */
+img.math-inline { vertical-align: middle; }
+img.math-block { display: block; margin: 0.6em auto; }
+
+/* Task lists */
+ul.contains-task-list { list-style-type: none; padding-left: 1em; }
+li.task-list-item { list-style-type: none; }
+
+/* Footnotes */
+hr.footnotes-sep { margin-top: 2em; border: none; border-top: 1px solid #ccc; }
+section.footnotes { font-size: 9.5pt; color: #555; }
+
+/* Table of contents */
+nav.toc { margin: 1em 0 1.5em 0; padding: 8px 12px; border: 1px solid #eee; background: #fafafa; }
+nav.toc .toc-title { font-weight: bold; margin-bottom: 0.4em; }
+nav.toc ul { margin: 0; padding-left: 1.2em; }
+
+/* Page break inserted between merged documents */
+.mdup-page-break { page-break-before: always; }

@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mdup"
+version = "0.1.0"
+description = "Export Markdown files to DOCX and/or PDF. Pure-Python, cross-platform, minimal dependencies."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Antonio Olleros", email = "antonio.olleros@meaningfuldata.eu" }]
+keywords = ["markdown", "docx", "pdf", "converter", "export", "mermaid"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+
+# Core dependencies: all pure-Python wheels, no native libraries required.
+dependencies = [
+    "markdown-it-py>=3.0",
+    "mdit-py-plugins>=0.4",
+    "htmldocx>=0.0.6",
+    "python-docx>=1.1",
+    "xhtml2pdf>=0.2.11",
+    # svglib 1.6 added rlpycairo -> pycairo (needs native cairo). Pin below that so
+    # xhtml2pdf's dependency tree stays pure-Python / no native libraries.
+    "svglib<1.6",
+]
+
+[project.optional-dependencies]
+# Higher-fidelity PDF backend (needs native Pango/Cairo libraries).
+weasyprint = ["weasyprint>=60"]
+# Static rendering of LaTeX math (no system LaTeX needed).
+math = ["matplotlib>=3.5"]
+all = ["weasyprint>=60", "matplotlib>=3.5"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+mdup = "mdup.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/meaningfuldata/mdup"
+
+[tool.setuptools]
+packages = ["mdup"]
+
+[tool.setuptools.package-data]
+mdup = ["resources/*.css"]

@@ -1,0 +1,176 @@
+"""Markdown → HTML body, using markdown-it-py and a handful of plugins.
+
+This is the single intermediate representation feeding both the DOCX and PDF
+writers. Mermaid fences and LaTeX math are routed through the optional renderers
+(:mod:`mdup.mermaid`, :mod:`mdup.mathrender`) via custom render rules; the work
+directory they write images into is threaded through markdown-it's ``env``.
+"""
+
+from __future__ import annotations
+
+import html
+import re
+from pathlib import Path
+
+from markdown_it import MarkdownIt
+from mdit_py_plugins.anchors import anchors_plugin
+from mdit_py_plugins.dollarmath import dollarmath_plugin
+from mdit_py_plugins.footnote import footnote_plugin
+from mdit_py_plugins.front_matter import front_matter_plugin
+from mdit_py_plugins.tasklists import tasklists_plugin
+
+from . import mathrender, mermaid
+
+_TOC_MARKER = re.compile(r"<p>\[\[?TOC\]\]?</p>", re.IGNORECASE)
+
+
+def _math_inline(tokens, idx, options, env):
+    return mathrender.render(tokens[idx].content, block=False, work_dir=env["work_dir"])
+
+
+def _math_block(tokens, idx, options, env):
+    return mathrender.render(tokens[idx].content, block=True, work_dir=env["work_dir"])
+
+
+def _build_md() -> MarkdownIt:
+    """Construct a configured MarkdownIt instance (stateless across renders)."""
+    md = (
+        MarkdownIt("commonmark", {"html": True, "linkify": True, "typographer": False})
+        .enable(["table", "strikethrough"])
+        .use(front_matter_plugin)        # strip YAML front-matter from output
+        .use(footnote_plugin)
+        .use(tasklists_plugin, enabled=True)
+        .use(anchors_plugin, max_level=6, permalink=False)
+        .use(dollarmath_plugin, double_inline=True)
+    )
+
+    # Route mermaid fenced blocks through the optional renderer; everything else
+    # uses the default fence rule.
+    default_fence = md.renderer.rules["fence"]
+
+    def fence(tokens, idx, options, env):
+        token = tokens[idx]
+        info = token.info.strip()
+        lang = info.split(maxsplit=1)[0] if info else ""
+        if lang.lower() == "mermaid":
+            return mermaid.render(token.content, env["work_dir"])
+        return default_fence(tokens, idx, options, env)
+
+    md.renderer.rules["fence"] = fence
+
+    # Route math tokens through the optional renderer.
+    md.renderer.rules["math_inline"] = _math_inline
+    md.renderer.rules["math_inline_double"] = _math_block  # $$...$$ used inline
+    md.renderer.rules["math_block"] = _math_block
+    md.renderer.rules["math_block_label"] = _math_block
+    return md
+
+
+_MD = _build_md()
+
+
+def _inline_text(inline_token) -> str:
+    """Plain-text content of an inline token (for TOC labels)."""
+    if not inline_token or not inline_token.children:
+        return inline_token.content if inline_token else ""
+    return "".join(
+        c.content for c in inline_token.children if c.type in ("text", "code_inline")
+    )
+
+
+def _extract_headings(tokens):
+    """Return (level, text, anchor_id) for every heading in the document."""
+    headings = []
+    for i, tok in enumerate(tokens):
+        if tok.type == "heading_open":
+            level = int(tok.tag[1])
+            anchor = tok.attrGet("id")
+            text = _inline_text(tokens[i + 1]) if i + 1 < len(tokens) else ""
+            headings.append((level, text, anchor))
+    return headings
+
+
+def build_toc(headings) -> str:
+    """Build a ``<nav class="toc">`` block from a list of (level, text, anchor)."""
+    if not headings:
+        return ""
+    items = []
+    for level, text, anchor in headings:
+        label = html.escape(text)
+        link = f'<a href="#{anchor}">{label}</a>' if anchor else label
+        indent = (level - 1) * 1.2
+        items.append(f'<li style="margin-left:{indent:.1f}em">{link}</li>')
+    return (
+        '<nav class="toc"><div class="toc-title">Contents</div>'
+        f'<ul>{"".join(items)}</ul></nav>'
+    )
+
+
+def has_toc_marker(body: str) -> bool:
+    return bool(_TOC_MARKER.search(body))
+
+
+def strip_toc_markers(body: str) -> str:
+    """Remove any literal ``[TOC]`` markers from a rendered body."""
+    return _TOC_MARKER.sub("", body)
+
+
+def prefix_anchors(body: str, headings, prefix: str):
+    """Namespace heading anchors so several documents can share one HTML page.
+
+    Returns ``(body, headings)`` with each heading's ``id`` (and the matching TOC
+    anchor) prefixed, so a consolidated TOC over merged files links unambiguously
+    even when two files use the same heading text. Non-heading ids (e.g. footnotes)
+    are left untouched.
+    """
+    mapping = {}
+    new_headings = []
+    for level, text, anchor in headings:
+        if anchor:
+            mapping[anchor] = f"{prefix}{anchor}"
+            new_headings.append((level, text, mapping[anchor]))
+        else:
+            new_headings.append((level, text, anchor))
+    if mapping:
+        def repl(m: "re.Match") -> str:
+            old = m.group(2)
+            return f"{m.group(1)}{mapping.get(old, old)}{m.group(3)}"
+
+        body = re.sub(r'(\bid=")([^"]*)(")', repl, body)
+    return body, new_headings
+
+
+def parse(md_text: str, *, work_dir: Path):
+    """Render Markdown to an HTML fragment and return ``(body, headings)``.
+
+    ``headings`` is a list of (level, text, anchor) in document order. No table of
+    contents is inserted — use :func:`apply_toc` (single file) or :func:`build_toc`
+    (consolidated across merged files).
+    """
+    env = {"work_dir": work_dir}
+    tokens = _MD.parse(md_text, env)
+    body = _MD.renderer.render(tokens, _MD.options, env)
+    return body, _extract_headings(tokens)
+
+
+def apply_toc(body: str, headings, toc: bool) -> str:
+    """Insert a single-document TOC: at a ``[TOC]`` marker if present, else at the
+    top when *toc* is True. A stray marker with no TOC wanted is dropped."""
+    toc_html = build_toc(headings)
+    if toc_html and _TOC_MARKER.search(body):
+        return _TOC_MARKER.sub(toc_html, body, count=1)
+    if toc and toc_html:
+        return toc_html + "\n" + body
+    if _TOC_MARKER.search(body):
+        return _TOC_MARKER.sub("", body)
+    return body
+
+
+def render_body(md_text: str, *, work_dir: Path, toc: bool = False) -> str:
+    """Render Markdown source to an HTML fragment (no <html>/<body> wrapper).
+
+    toc: if True, insert a table of contents at the top (unless a ``[TOC]`` marker
+         is present, in which case it is inserted there regardless of this flag).
+    """
+    body, headings = parse(md_text, work_dir=work_dir)
+    return apply_toc(body, headings, toc)

@@ -1,0 +1,143 @@
+"""Output writers: HTML → DOCX and HTML → PDF.
+
+* DOCX uses ``htmldocx`` (built on ``python-docx``) — pure Python, no native deps.
+* PDF uses ``xhtml2pdf`` by default (pure Python) or ``weasyprint`` if explicitly
+  requested (higher fidelity, but needs native Pango/Cairo libraries).
+
+Both PDF backends are imported lazily so a missing optional backend never affects
+the default path.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+
+try:  # Python 3.9+: importlib.resources.files
+    from importlib.resources import files as _res_files
+except ImportError:  # pragma: no cover
+    _res_files = None
+
+_IMG_SRC = re.compile(r'(<img\b[^>]*?\ssrc=)(["\'])(.*?)\2', re.IGNORECASE)
+
+
+def load_css() -> str:
+    """Return the bundled default stylesheet."""
+    if _res_files is not None:
+        return _res_files("mdup.resources").joinpath("default.css").read_text(
+            encoding="utf-8"
+        )
+    here = Path(__file__).parent / "resources" / "default.css"  # pragma: no cover
+    return here.read_text(encoding="utf-8")
+
+
+def wrap_html(body: str, title: str = "", css: str | None = None) -> str:
+    """Wrap an HTML body fragment in a complete, styled HTML document."""
+    if css is None:
+        css = load_css()
+    safe_title = (title or "Document").replace("<", "&lt;").replace(">", "&gt;")
+    return (
+        "<!DOCTYPE html>\n<html><head>"
+        '<meta charset="utf-8" />'
+        f"<title>{safe_title}</title>"
+        f"<style>{css}</style>"
+        f"</head><body>{body}</body></html>"
+    )
+
+
+# --------------------------------------------------------------------------- DOCX
+
+
+def _fit_images_to_page(document) -> None:
+    """Scale down any inline image larger than the page's text area.
+
+    ``htmldocx`` adds pictures at their native size, and python-docx assumes 72 DPI
+    for images without DPI metadata (mermaid/math PNGs), so wide diagrams overflow
+    the margins. We shrink anything bigger than the printable area to fit, keeping
+    aspect ratio and never upscaling — the DOCX counterpart of CSS ``max-width:100%``.
+    """
+    section = document.sections[0]
+    max_w = section.page_width - section.left_margin - section.right_margin
+    max_h = section.page_height - section.top_margin - section.bottom_margin
+    if not max_w or not max_h:
+        return
+    for shape in document.inline_shapes:
+        w, h = shape.width, shape.height
+        if not w or not h:
+            continue
+        scale = min(1.0, max_w / w, max_h / h)
+        if scale < 1.0:
+            shape.width = int(w * scale)
+            shape.height = int(h * scale)
+
+
+def to_docx(body: str, out_path: str | os.PathLike) -> None:
+    """Write *body* (an HTML fragment) to a .docx file."""
+    from docx import Document
+    from htmldocx import HtmlToDocx
+
+    document = Document()
+    parser = HtmlToDocx()
+    parser.add_html_to_document(body, document)
+    _fit_images_to_page(document)
+    document.save(os.fspath(out_path))
+
+
+# ---------------------------------------------------------------------------- PDF
+
+
+def _xhtml2pdf_link_callback(uri: str, rel: str) -> str:
+    """Resolve resource URIs for xhtml2pdf. Our image srcs are absolute paths."""
+    if uri.startswith("file://"):
+        import urllib.request
+
+        return urllib.request.url2pathname(uri[7:])
+    return uri
+
+
+def _to_file_uris(body: str) -> str:
+    """Convert absolute filesystem image paths to file:// URIs (for weasyprint)."""
+
+    def repl(m: re.Match) -> str:
+        prefix, quote, src = m.group(1), m.group(2), m.group(3)
+        if os.path.isabs(src) and os.path.exists(src):
+            src = Path(src).as_uri()
+        return f"{prefix}{quote}{src}{quote}"
+
+    return _IMG_SRC.sub(repl, body)
+
+
+def to_pdf(
+    body: str,
+    out_path: str | os.PathLike,
+    *,
+    backend: str = "xhtml2pdf",
+    title: str = "",
+    work_dir: Path | None = None,
+) -> None:
+    """Write *body* (an HTML fragment) to a .pdf file using the chosen backend."""
+    if backend == "weasyprint":
+        from weasyprint import HTML  # lazy: optional native-dependency backend
+
+        html_doc = wrap_html(_to_file_uris(body), title=title)
+        base = (work_dir or Path.cwd()).as_uri()
+        HTML(string=html_doc, base_url=base).write_pdf(os.fspath(out_path))
+        return
+
+    if backend == "xhtml2pdf":
+        from xhtml2pdf import pisa  # lazy
+
+        html_doc = wrap_html(body, title=title)
+        with open(os.fspath(out_path), "wb") as fh:
+            status = pisa.CreatePDF(
+                src=html_doc,
+                dest=fh,
+                encoding="utf-8",
+                link_callback=_xhtml2pdf_link_callback,
+            )
+        if status.err:
+            raise RuntimeError(f"xhtml2pdf failed to render {out_path}")
+        return
+
+    raise ValueError(f"Unknown PDF backend: {backend!r} (use 'xhtml2pdf' or 'weasyprint')")
