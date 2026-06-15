@@ -34,6 +34,14 @@ This document exercises the Markdown features mdup supports. It has **bold**,
 | Footnotes |    ✅     | see below[^1]         |
 | Math      |    ✅     | rendered if available |
 
+## Admonitions
+
+!!! note "Heads up"
+    Admonitions render as colour-coded callout boxes in both PDF and DOCX.
+
+!!! warning
+    Without an explicit title the type name is used.
+
 ## Blockquote & code
 
 > The best way to predict the future is to invent it.

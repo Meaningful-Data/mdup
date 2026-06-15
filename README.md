@@ -62,8 +62,9 @@ convert(["a.md", "b.md"], formats=["pdf"], output="book.pdf", merge=True)
 ## Supported Markdown
 
 CommonMark plus: GFM tables, task lists, strikethrough, footnotes, auto table of
-contents, fenced code, embedded images (relative paths resolved against the source
-file; remote URLs downloaded), LaTeX math, and mermaid diagrams.
+contents, fenced code, [admonitions](https://squidfunk.github.io/mkdocs-material/reference/admonitions/)
+(`!!! note` / `??? warning` callouts), embedded images (relative paths resolved
+against the source file; remote URLs downloaded), LaTeX math, and mermaid diagrams.
 
 ## Notes & limitations
 
@@ -76,6 +77,11 @@ file; remote URLs downloaded), LaTeX math, and mermaid diagrams.
 - **Mermaid** requires the `mmdc` CLI. Without it, diagrams are shown as styled code
   blocks with a warning. A snap-installed `mmdc` is supported (mdup places its
   scratch files where snap confinement can read them).
+- **Admonitions** render as a colour-coded callout box (tinted background + accent
+  bar + coloured title) in both PDF and DOCX. Type icons are intentionally omitted:
+  the pure-Python PDF backend can't embed an emoji font, so colour and the title
+  carry the type instead. The collapsible `???`/`???+` blocks render fully expanded
+  (static documents have nothing to collapse into).
 
 ## License
 

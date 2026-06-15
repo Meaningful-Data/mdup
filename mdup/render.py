@@ -13,13 +13,14 @@ import re
 from pathlib import Path
 
 from markdown_it import MarkdownIt
+from mdit_py_plugins.admon import admon_plugin
 from mdit_py_plugins.anchors import anchors_plugin
 from mdit_py_plugins.dollarmath import dollarmath_plugin
 from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.front_matter import front_matter_plugin
 from mdit_py_plugins.tasklists import tasklists_plugin
 
-from . import mathrender, mermaid
+from . import admonitions, mathrender, mermaid
 
 _TOC_MARKER = re.compile(r"<p>\[\[?TOC\]\]?</p>", re.IGNORECASE)
 
@@ -32,6 +33,52 @@ def _math_block(tokens, idx, options, env):
     return mathrender.render(tokens[idx].content, block=True, work_dir=env["work_dir"])
 
 
+# --- Admonitions (!!! / ??? callouts) -------------------------------------
+#
+# We render each admonition as a full-width single-cell table rather than the
+# plugin's default <div>. A <div> with CSS looks right in PDF but htmldocx drops
+# it entirely (no CSS, no box); a one-cell table is the one structure both
+# writers turn into a real box. The dynamic per-type colours go inline so the PDF
+# backend needs no generated stylesheet, and the accent-coloured title doubles as
+# the marker the DOCX post-pass keys on (see backends._style_admonitions).
+
+def _admonition_open(tokens, idx, options, env):
+    tok = tokens[idx]
+    tag = (tok.meta or {}).get("tag", "")
+    canon = admonitions.resolve(tag)
+    accent, bg = admonitions.style_for(tag)
+    env.setdefault("_admon_stack", []).append((accent, bg))
+    classes = tok.attrGet("class") or f"admonition {canon}"
+    return (
+        f'<table class="{classes}"><tbody><tr>'
+        f'<td class="admonition-cell" style="background-color:{bg};'
+        f'border-left:4px solid {accent};">'
+    )
+
+
+def _admonition_close(tokens, idx, options, env):
+    stack = env.get("_admon_stack")
+    if stack:
+        stack.pop()
+    return "</td></tr></tbody></table>\n"
+
+
+def _admonition_title_open(tokens, idx, options, env):
+    stack = env.get("_admon_stack") or [admonitions.style_for("note")]
+    accent = stack[-1][0]
+    # The colour must live on a <span> (not the <p>): htmldocx only copies run
+    # colour from a span's inline style, and that coloured run is exactly what the
+    # DOCX post-pass uses to recognise the admonition.
+    return (
+        f'<p class="admonition-title" style="margin:0 0 0.4em 0;">'
+        f'<span style="color:{accent};"><strong>'
+    )
+
+
+def _admonition_title_close(tokens, idx, options, env):
+    return "</strong></span></p>\n"
+
+
 def _build_md() -> MarkdownIt:
     """Construct a configured MarkdownIt instance (stateless across renders)."""
     md = (
@@ -42,6 +89,7 @@ def _build_md() -> MarkdownIt:
         .use(tasklists_plugin, enabled=True)
         .use(anchors_plugin, max_level=6, permalink=False)
         .use(dollarmath_plugin, double_inline=True)
+        .use(admon_plugin)               # !!! note / ??? collapsible callouts
     )
 
     # Route mermaid fenced blocks through the optional renderer; everything else
@@ -63,6 +111,12 @@ def _build_md() -> MarkdownIt:
     md.renderer.rules["math_inline_double"] = _math_block  # $$...$$ used inline
     md.renderer.rules["math_block"] = _math_block
     md.renderer.rules["math_block_label"] = _math_block
+
+    # Route admonitions to a styled single-cell table (see helpers above).
+    md.renderer.rules["admonition_open"] = _admonition_open
+    md.renderer.rules["admonition_close"] = _admonition_close
+    md.renderer.rules["admonition_title_open"] = _admonition_title_open
+    md.renderer.rules["admonition_title_close"] = _admonition_title_close
     return md
 
 

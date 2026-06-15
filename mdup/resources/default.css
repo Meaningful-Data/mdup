@@ -101,5 +101,17 @@ nav.toc { margin: 1em 0 1.5em 0; padding: 8px 12px; border: 1px solid #eee; back
 nav.toc .toc-title { font-weight: bold; margin-bottom: 0.4em; }
 nav.toc ul { margin: 0; padding-left: 1.2em; }
 
+/* Admonitions (!!! note / ??? warning callouts).
+   Rendered as a full-width single-cell table; per-type colours (background and
+   the left accent bar) are set inline by the renderer. We only need to undo the
+   generic td border here so the inline accent rule is the sole visible edge. */
+table.admonition { margin: 0.8em 0; }
+table.admonition td.admonition-cell {
+    border: none;          /* generic th,td border off; accent set inline */
+    padding: 6px 12px;
+    vertical-align: top;
+}
+.admonition-title { margin-top: 0; }
+
 /* Page break inserted between merged documents */
 .mdup-page-break { page-break-before: always; }

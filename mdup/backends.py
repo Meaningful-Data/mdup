@@ -14,6 +14,8 @@ import os
 import re
 from pathlib import Path
 
+from . import admonitions
+
 try:  # Python 3.9+: importlib.resources.files
     from importlib.resources import files as _res_files
 except ImportError:  # pragma: no cover
@@ -72,6 +74,67 @@ def _fit_images_to_page(document) -> None:
             shape.height = int(h * scale)
 
 
+def _set_cell_shading(tcPr, fill: str) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), fill)
+    tcPr.append(shd)
+
+
+def _set_cell_borders(tcPr, accent: str) -> None:
+    """A thick accent rule on the left, hairline grey on the other three sides."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    borders = OxmlElement("w:tcBorders")
+    edges = {
+        "left": ("24", accent),   # 24 eighths = 3pt accent bar
+        "top": ("4", "DDDDDD"),
+        "bottom": ("4", "DDDDDD"),
+        "right": ("4", "DDDDDD"),
+    }
+    for edge, (size, color) in edges.items():
+        e = OxmlElement(f"w:{edge}")
+        e.set(qn("w:val"), "single")
+        e.set(qn("w:sz"), size)
+        e.set(qn("w:space"), "0")
+        e.set(qn("w:color"), color)
+        borders.append(e)
+    tcPr.append(borders)
+
+
+def _style_admonitions(document) -> None:
+    """Paint admonition callouts in a freshly built DOCX.
+
+    htmldocx renders our admonitions as bare single-cell tables and discards the
+    CSS that colours them in PDF. We recognise them after the fact — a 1x1 table
+    whose title run carries one of our accent colours (see :mod:`mdup.admonitions`)
+    — and add the matching cell shading and left accent bar. This is the DOCX twin
+    of the inline CSS emitted by ``render._admonition_open``; anything that is not
+    an admonition (real user tables) is left untouched.
+    """
+    for table in document.tables:
+        if len(table.rows) != 1 or len(table.columns) != 1:
+            continue
+        cell = table.cell(0, 0)
+        title = next((p for p in cell.paragraphs if p.text.strip()), None)
+        run = title and next((r for r in title.runs if r.text.strip()), None)
+        color = run and run.font.color
+        if not color or color.rgb is None:
+            continue
+        accent = str(color.rgb).upper()
+        if accent not in admonitions.ACCENTS:
+            continue
+        _accent, bg = admonitions.style_for(admonitions.ACCENTS[accent])
+        tcPr = cell._tc.get_or_add_tcPr()
+        _set_cell_shading(tcPr, bg.lstrip("#").upper())
+        _set_cell_borders(tcPr, accent)
+
+
 def to_docx(body: str, out_path: str | os.PathLike) -> None:
     """Write *body* (an HTML fragment) to a .docx file."""
     from docx import Document
@@ -81,6 +144,7 @@ def to_docx(body: str, out_path: str | os.PathLike) -> None:
     parser = HtmlToDocx()
     parser.add_html_to_document(body, document)
     _fit_images_to_page(document)
+    _style_admonitions(document)
     document.save(os.fspath(out_path))
 
 

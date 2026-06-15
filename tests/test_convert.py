@@ -33,6 +33,64 @@ def test_toc_marker_replaced(tmp_path):
     assert "[TOC]" not in html
 
 
+def test_admonition_renders_as_styled_table(tmp_path):
+    """`!!! warning` becomes a single-cell table coloured per type (for PDF)."""
+    from mdup import admonitions
+
+    md = '!!! warning "Be careful"\n    Body text.\n'
+    html = render.render_body(md, work_dir=tmp_path)
+    accent, bg = admonitions.style_for("warning")
+    assert 'class="admonition warning"' in html       # type class carried through
+    assert f"background-color:{bg}" in html            # tinted box
+    assert f"border-left:4px solid {accent}" in html   # accent bar
+    assert f"color:{accent}" in html                   # coloured title
+
+
+def test_admonition_alias_and_default(tmp_path):
+    """Aliases resolve to a canonical type; unknown tags fall back to `note`."""
+    from mdup import admonitions
+
+    assert admonitions.resolve("caution") == "warning"
+    assert admonitions.resolve("totally-made-up") == "note"
+    html = render.render_body("!!! caution\n    Watch out.\n", work_dir=tmp_path)
+    accent, _bg = admonitions.style_for("warning")
+    assert f"border-left:4px solid {accent}" in html
+
+
+def test_docx_admonition_shaded_real_table_untouched(tmp_path):
+    """DOCX: admonitions get cell shading + accent border; user tables don't."""
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    from mdup import admonitions
+
+    md = (
+        '!!! danger "Stop"\n    Careful here.\n\n'
+        "| A | B |\n|---|---|\n| 1 | 2 |\n"
+    )
+    written = convert([_md_file(tmp_path, md)], formats=["docx"], output=tmp_path)
+    doc = Document(str(written[0]))
+
+    def cell_fill(table):
+        tcPr = table.cell(0, 0)._tc.tcPr
+        shd = tcPr.find(qn("w:shd")) if tcPr is not None else None
+        return shd.get(qn("w:fill")) if shd is not None else None
+
+    admon = [t for t in doc.tables if (t.rows, t.columns) and len(t.columns) == 1]
+    assert admon, "expected the admonition single-cell table"
+    _accent, bg = admonitions.style_for("danger")
+    assert cell_fill(admon[0]) == bg.lstrip("#").upper()
+
+    real = [t for t in doc.tables if len(t.columns) == 2]
+    assert real and cell_fill(real[0]) is None    # ordinary table left unstyled
+
+
+def _md_file(tmp_path, text, name="a.md"):
+    p = tmp_path / name
+    p.write_text(text)
+    return p
+
+
 # ----------------------------------------------------------------- fallbacks
 
 def test_mermaid_fallback_when_no_renderer(tmp_path, monkeypatch):
