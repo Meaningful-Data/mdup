@@ -135,6 +135,28 @@ def _style_admonitions(document) -> None:
         _set_cell_borders(tcPr, accent)
 
 
+def _flatten_loose_list_items(body: str) -> str:
+    """Unwrap the leading ``<p>`` inside each ``<li>`` for the DOCX path.
+
+    markdown-it wraps list-item content in ``<p>`` whenever the list is *loose*
+    (items separated by blank lines or spanning several lines). htmldocx turns
+    such an ``<li>`` into two paragraphs — an empty ``List Number``/``List Bullet``
+    paragraph carrying the marker, then a separate ``Normal`` paragraph with the
+    text — so the number ends up on its own line. PDF is unaffected (CSS keeps the
+    ``<p>`` inline), so this runs only here. Dropping the leading ``<p>`` wrapper
+    puts the first line back beside its marker; any *further* paragraphs in a
+    multi-block item are left as continuation paragraphs.
+    """
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(body, "html.parser")
+    for li in soup.find_all("li"):
+        first_p = li.find("p", recursive=False)
+        if first_p is not None:
+            first_p.unwrap()
+    return str(soup)
+
+
 def to_docx(body: str, out_path: str | os.PathLike) -> None:
     """Write *body* (an HTML fragment) to a .docx file."""
     from docx import Document
@@ -142,7 +164,7 @@ def to_docx(body: str, out_path: str | os.PathLike) -> None:
 
     document = Document()
     parser = HtmlToDocx()
-    parser.add_html_to_document(body, document)
+    parser.add_html_to_document(_flatten_loose_list_items(body), document)
     _fit_images_to_page(document)
     _style_admonitions(document)
     document.save(os.fspath(out_path))

@@ -85,6 +85,27 @@ def test_docx_admonition_shaded_real_table_untouched(tmp_path):
     assert real and cell_fill(real[0]) is None    # ordinary table left unstyled
 
 
+def test_docx_loose_list_marker_stays_with_text(tmp_path):
+    """A loose (blank-line-separated) ordered list keeps each number beside its text.
+
+    markdown-it wraps loose list items in <p>, which htmldocx would otherwise split
+    into an empty numbered paragraph plus a separate text paragraph.
+    """
+    from docx import Document
+
+    md = "1. **First** item spanning\n   two lines.\n\n2. Second item.\n"
+    written = convert([_md_file(tmp_path, md)], formats=["docx"], output=tmp_path)
+    doc = Document(str(written[0]))
+
+    numbered = [p for p in doc.paragraphs if "Number" in p.style.name]
+    assert len(numbered) == 2
+    assert all(p.text.strip() for p in numbered)        # text on the marker's line
+    assert numbered[0].text.startswith("First")
+    # no orphaned text left behind in a Normal paragraph
+    assert not any(p.style.name == "Normal" and "Second item" in p.text
+                   for p in doc.paragraphs)
+
+
 def _md_file(tmp_path, text, name="a.md"):
     p = tmp_path / name
     p.write_text(text)
